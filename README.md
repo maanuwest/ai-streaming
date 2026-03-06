@@ -27,6 +27,8 @@ That's it! Start chatting with the AI.
 
 - 🚀 Real-time LLM streaming with OpenAI GPT-4o-mini
 - 💬 Modern, responsive chat interface
+- � Rich Markdown formatting (headings, lists, code blocks, bold, etc.)
+- �💾 Chat history persistence with localStorage (survives page reloads)
 - ⚡ Built with Next.js 16.1.6 and Turbopack
 - 🎨 Styled with Tailwind CSS v4
 - 🔒 Secure API key management with environment variables
@@ -43,7 +45,7 @@ That's it! Start chatting with the AI.
 
    ```bash
    git clone <repository-url>
-   cd aumera-stream
+   cd ai-streaming
    npm install
    ```
 
@@ -93,11 +95,20 @@ The streaming is implemented **without using the Vercel AI SDK** - everything is
 
 2. **Client Component** (`src/components/chat-interface.tsx`):
    - Manages message state and UI
+   - Renders Markdown formatting in assistant responses
+   - Persists chat history to localStorage
+   - Restores conversation context on page reload
    - Sends requests to the API route
    - Reads the streaming response using `ReadableStream`
    - Parses Server-Sent Events (SSE) format
    - Updates the UI in real-time with debounced rendering (50ms)
    - Smart auto-scroll that respects user's scroll position
+
+3. **Stream Decoder** (`src/lib/stream-decoder.ts`):
+   - Parses SSE format from OpenAI API
+   - Handles buffering of incomplete messages
+   - Yields content tokens as they arrive
+   - Reusable utility for other streaming use cases
 
 ### Key Technologies
 
@@ -187,6 +198,22 @@ User Input → Chat Component → API Route → OpenAI API
 - Shows "New messages below" button when disabled
 - Prevents shake/flicker with generous thresholds and direction detection
 
+**10. LocalStorage Persistence**
+
+- Automatically saves chat history to browser localStorage
+- Restores messages on page reload/refresh
+- Maintains conversation context across sessions
+- "Clear Chat" button to reset history when needed
+- Error handling for localStorage unavailable/quota exceeded
+
+**11. Markdown Rendering**
+
+- Uses `react-markdown` for formatting assistant responses
+- Supports headings, lists, code blocks, bold, italic, links
+- Custom Tailwind styling for consistent look & feel
+- User messages remain plain text for simplicity
+- Syntax highlighting ready (can be extended with plugins)
+
 ### Performance Considerations
 
 - **Debounced Streaming**: 80% fewer re-renders with 50ms batching
@@ -218,17 +245,20 @@ npm run lint         # Run ESLint
 
 1. **Basic Chat**: Type "Hello!" and watch the response stream token-by-token
 2. **Long Responses**: Ask "Explain quantum computing in detail" to see streaming with longer content
-3. **Scroll Behavior**: While a long response is streaming, scroll up to read earlier messages - notice the auto-scroll stops
-4. **Scroll Button**: When scrolled up, click the "↓ New messages below" button to jump back to the latest message
-5. **Multiple Messages**: Have a conversation - context is maintained across messages
-6. **Mobile View**: Resize your browser or test on mobile for responsive design
-7. **Error Handling**: Stop the server mid-stream to see error recovery
+3. **Persistence Test**: Have a conversation, then refresh the page (F5 or Cmd+R) - your messages should remain
+4. **Clear History**: Click the "Clear Chat" button in the header to reset the conversation
+5. **Scroll Behavior**: While a long response is streaming, scroll up to read earlier messages - notice the auto-scroll stops
+6. **Scroll Button**: When scrolled up, click the "↓ New messages below" button to jump back to the latest message
+7. **Multiple Messages**: Have a conversation - context is maintained across messages and page reloads
+8. **Mobile View**: Resize your browser or test on mobile for responsive design
+9. **Error Handling**: Stop the server mid-stream to see error recovery
 
 ### Expected Behavior
 
 - ✅ Responses appear in real-time with optimized rendering (50ms batching)
 - ✅ Three-dot animation while waiting for first token
-- ✅ Chat history persists during the session
+- ✅ Chat history persists across page reloads and browser sessions
+- ✅ "Clear Chat" button appears when there are messages
 - ✅ Smart auto-scroll: follows new messages when you're at the bottom
 - ✅ Scroll preservation: stays in place when you scroll up to read
 - ✅ "New messages below" button appears when scrolled up

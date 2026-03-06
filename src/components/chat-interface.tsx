@@ -1,11 +1,15 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
+import { decodeStreamResponse } from "@/lib/stream-decoder";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
+
+const STORAGE_KEY = "chat-messages";
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -21,9 +25,42 @@ export default function ChatInterface() {
 
   const DEBOUNCE_MS = 50; // Update UI every 50ms instead of every token
 
+  // Load messages from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Message[];
+        setMessages(parsed);
+      }
+    } catch (error) {
+      console.error("Failed to load messages from localStorage:", error);
+    }
+  }, []);
+
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    try {
+      if (messages.length > 0) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+      }
+    } catch (error) {
+      console.error("Failed to save messages to localStorage:", error);
+    }
+  }, [messages]);
+
   const scrollToBottom = () => {
     if (isAutoScrollEnabled) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  const clearChat = () => {
+    setMessages([]);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      console.error("Failed to clear messages from localStorage:", error);
     }
   };
 
@@ -113,7 +150,6 @@ export default function ChatInterface() {
       }
 
       const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
 
       if (!reader) {
         throw new Error("No reader available");
@@ -121,39 +157,12 @@ export default function ChatInterface() {
 
       let accumulatedContent = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-
-            if (data === "[DONE]") {
-              continue;
-            }
-
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-
-              if (content) {
-                accumulatedContent += content;
-
-                // Use debounced update instead of immediate update
-                updateMessageDebounced(accumulatedContent, assistantMsgIndex);
-              }
-            } catch (e) {
-              // Skip invalid JSON
-              console.error("JSON parse error:", e);
-            }
-          }
+      // Use the stream decoder utility
+      for await (const chunk of decodeStreamResponse(reader)) {
+        if (chunk.content) {
+          accumulatedContent += chunk.content;
+          // Use debounced update instead of immediate update
+          updateMessageDebounced(accumulatedContent, assistantMsgIndex);
         }
       }
 
@@ -185,11 +194,22 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
       {/* Header */}
-      <div className="mb-4">
-        <h1 className="text-3xl font-bold">LLM Streaming Chat</h1>
-        <p className="text-muted-foreground">
-          Real-time streaming chatbot powered by OpenAI
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">LLM Streaming Chat</h1>
+          <p className="text-muted-foreground">
+            Real-time streaming chatbot powered by OpenAI
+          </p>
+        </div>
+        {messages.length > 0 && (
+          <button
+            onClick={clearChat}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground border rounded-lg hover:bg-muted/50 transition-colors"
+            title="Clear chat history"
+          >
+            Clear Chat
+          </button>
+        )}
       </div>
 
       {/* Messages Container */}
@@ -203,6 +223,9 @@ export default function ChatInterface() {
             <p className="text-lg">Start a conversation!</p>
             <p className="text-sm mt-2">
               Type a message below to begin chatting.
+            </p>
+            <p className="text-xs mt-2 opacity-60">
+              Your chat history is saved and will persist across page reloads.
             </p>
           </div>
         )}
@@ -224,7 +247,79 @@ export default function ChatInterface() {
               <div className="text-xs font-semibold mb-1 opacity-70">
                 {message.role === "user" ? "You" : "Assistant"}
               </div>
-              <div className="whitespace-pre-wrap">{message.content}</div>
+              {message.role === "user" ? (
+                <div className="whitespace-pre-wrap">{message.content}</div>
+              ) : (
+                <div className="markdown-content">
+                  <ReactMarkdown
+                    components={{
+                      h1: ({ ...props }) => (
+                        <h1
+                          className="text-2xl font-bold mt-4 mb-3"
+                          {...props}
+                        />
+                      ),
+                      h2: ({ ...props }) => (
+                        <h2
+                          className="text-xl font-bold mt-4 mb-2"
+                          {...props}
+                        />
+                      ),
+                      h3: ({ ...props }) => (
+                        <h3
+                          className="text-lg font-semibold mt-3 mb-2"
+                          {...props}
+                        />
+                      ),
+                      p: ({ ...props }) => (
+                        <p className="my-2 leading-relaxed" {...props} />
+                      ),
+                      ul: ({ ...props }) => (
+                        <ul
+                          className="my-2 list-disc pl-5 space-y-1"
+                          {...props}
+                        />
+                      ),
+                      ol: ({ ...props }) => (
+                        <ol
+                          className="my-2 list-decimal pl-5 space-y-1"
+                          {...props}
+                        />
+                      ),
+                      li: ({ ...props }) => <li className="my-1" {...props} />,
+                      strong: ({ ...props }) => (
+                        <strong className="font-semibold" {...props} />
+                      ),
+                      code: ({ ...props }) => (
+                        <code
+                          className="bg-muted/50 px-1.5 py-0.5 rounded text-sm font-mono"
+                          {...props}
+                        />
+                      ),
+                      pre: ({ ...props }) => (
+                        <pre
+                          className="bg-muted/50 p-3 rounded-lg overflow-x-auto my-2"
+                          {...props}
+                        />
+                      ),
+                      blockquote: ({ ...props }) => (
+                        <blockquote
+                          className="border-l-4 border-primary pl-4 italic my-2"
+                          {...props}
+                        />
+                      ),
+                      a: ({ ...props }) => (
+                        <a
+                          className="text-primary underline hover:opacity-80"
+                          {...props}
+                        />
+                      ),
+                    }}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              )}
               {message.role === "assistant" &&
                 message.content === "" &&
                 isLoading && (
