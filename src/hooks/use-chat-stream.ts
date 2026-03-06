@@ -17,7 +17,7 @@ export function useChatStream() {
   const updateMessageDebounced = (
     content: string,
     messageIndex: number,
-    setMessages: React.Dispatch<React.SetStateAction<Message[]>>
+    setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
   ) => {
     contentBufferRef.current = content;
 
@@ -49,7 +49,7 @@ export function useChatStream() {
     messages: Message[],
     userMessage: Message,
     setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
-    assistantMsgIndex: number
+    assistantMsgIndex: number,
   ) => {
     setIsLoading(true);
 
@@ -83,7 +83,11 @@ export function useChatStream() {
       for await (const chunk of decodeStreamResponse(reader)) {
         if (chunk.content) {
           accumulatedContent += chunk.content;
-          updateMessageDebounced(accumulatedContent, assistantMsgIndex, setMessages);
+          updateMessageDebounced(
+            accumulatedContent,
+            assistantMsgIndex,
+            setMessages,
+          );
         }
       }
 

@@ -82,12 +82,16 @@ src/
 │   ├── layout.tsx             # Root layout
 │   └── page.tsx               # Main chat page
 ├── components/
-│   ├── chat-interface.tsx     # Main chat orchestrator (~350 lines)
+│   ├── chat-interface.tsx     # Main chat orchestrator (~184 lines)
 │   └── chat/
 │       ├── chat-header.tsx         # Header with title & clear button
 │       ├── message-bubble.tsx      # Individual message rendering
 │       ├── suggested-prompts.tsx   # Empty state prompt grid
 │       └── markdown-components.tsx # Markdown styling config
+├── hooks/
+│   ├── use-chat-messages.ts   # localStorage persistence logic
+│   ├── use-auto-scroll.ts     # Smart scroll behavior management
+│   └── use-chat-stream.ts     # Streaming & debouncing logic
 └── lib/
     ├── input-validator.ts     # Input validation, sanitization & rate limiting
     └── stream-decoder.ts      # SSE stream parsing utility
@@ -108,14 +112,7 @@ The streaming is implemented **without using the Vercel AI SDK** - everything is
    - Orchestrates chat functionality and state management
    - Validates & sanitizes user input before sending
    - Enforces rate limiting (10 messages/minute)
-   - Persists chat history to localStorage
-   - Restores conversation context on page reload
-   - Sends requests to the API route with AbortController
-   - Reads the streaming response using `ReadableStream`
-   - Parses Server-Sent Events (SSE) format
-   - Updates the UI in real-time with debounced rendering (50ms)
-   - Smart auto-scroll that respects user's scroll position
-   - Cancels in-flight requests when user clicks Stop button
+   - Delegates logic to custom hooks (messages, streaming, scrolling)
    - Delegates rendering to focused sub-components
 
 3. **Stream Decoder** (`src/lib/stream-decoder.ts`):
@@ -131,7 +128,12 @@ The streaming is implemented **without using the Vercel AI SDK** - everything is
    - Rate limiting with sliding window (10 messages/minute)
    - Track message timestamps for abuse prevention
 
-5. **UI Components** (`src/components/chat/`):
+5. **Custom Hooks** (`src/hooks/`):
+   - **useChatMessages**: localStorage persistence with auto-save/load
+   - **useAutoScroll**: Smart scroll detection and management
+   - **useChatStream**: Streaming logic with debouncing and abort control
+
+6. **UI Components** (`src/components/chat/`):
    - **ChatHeader**: Title, subtitle, and clear chat button
    - **MessageBubble**: User/assistant message rendering with markdown
    - **SuggestedPrompts**: Empty state with clickable prompt grid
@@ -195,8 +197,9 @@ User Input → Validation → Chat Component → API Route → OpenAI API
 
 **5. Component Architecture**
 
-- Main chat-interface as orchestrator (~350 lines)
+- Main chat-interface as orchestrator (~184 lines)
 - Extracted UI components for single responsibility
+- Extracted custom hooks for logic reusability
 - Reusable, testable components (header, messages, prompts)
 - Markdown configuration separated for maintainability
 - Server Components for static layouts
@@ -274,13 +277,24 @@ User Input → Validation → Chat Component → API Route → OpenAI API
 
 **15. Component Extraction & Refactoring**
 
-- Reduced main component from 487 to ~350 lines (28% reduction)
+- Reduced main component from 487 to 184 lines (62% reduction)
 - Extracted 4 focused UI components for better maintainability
-- Single responsibility principle: each component has one job
-- Improved testability: components can be tested in isolation
-- Reusable components: can be used in other parts of the app
+- Extracted 3 custom hooks for logic separation
+- Single responsibility principle: each file has one clear purpose
+- Improved testability: components and hooks can be tested in isolation
+- Reusable components and hooks: can be used in other parts of the app
 - Markdown configuration centralized and reusable
 - Follows Copilot instructions for clean code organization
+
+**16. Custom Hooks Pattern**
+
+- **useChatMessages**: Encapsulates localStorage persistence logic
+- **useAutoScroll**: Manages scroll position and auto-scroll behavior
+- **useChatStream**: Handles streaming, debouncing, and abort control
+- Each hook has single responsibility and clear API
+- Hooks are framework-agnostic and easily testable
+- Main component becomes a thin orchestration layer
+- Follows React best practices for hook composition
 
 ### Performance Considerations
 
