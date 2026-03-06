@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import { Send, Square } from "lucide-react";
 import { decodeStreamResponse } from "@/lib/stream-decoder";
 
 interface Message {
@@ -10,6 +11,13 @@ interface Message {
 }
 
 const STORAGE_KEY = "chat-messages";
+
+const SUGGESTED_PROMPTS = [
+  "Help me create a newsletter for a zoo that has a new animal",
+  "Write a travel blog post about visiting the ancient ruins of Machu Picchu",
+  "Explain how neural networks work using simple analogies and real-world examples",
+  "Create a 7-day meal plan for a busy professional who wants to eat healthier",
+];
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -22,6 +30,7 @@ export default function ChatInterface() {
   const lastScrollTop = useRef(0);
   const contentBufferRef = useRef("");
   const debounceTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const DEBOUNCE_MS = 50; // Update UI every 50ms instead of every token
 
@@ -115,6 +124,25 @@ export default function ChatInterface() {
     }
   }, [messages, isAutoScrollEnabled]);
 
+  const handleSuggestedPrompt = (prompt: string) => {
+    setInput(prompt);
+    // Optionally auto-submit by creating a synthetic submit
+    setTimeout(() => {
+      const form = document.querySelector("form");
+      if (form) {
+        form.requestSubmit();
+      }
+    }, 0);
+  };
+
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -134,6 +162,10 @@ export default function ChatInterface() {
     const assistantMsgIndex = messages.length + 1;
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -143,6 +175,7 @@ export default function ChatInterface() {
         body: JSON.stringify({
           messages: [...messages, userMessage],
         }),
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -177,16 +210,23 @@ export default function ChatInterface() {
         return newMessages;
       });
     } catch (error) {
-      console.error("Error:", error);
-      setMessages((prev) => {
-        const newMessages = [...prev];
-        newMessages[assistantMsgIndex] = {
-          role: "assistant",
-          content: "Sorry, an error occurred. Please try again.",
-        };
-        return newMessages;
-      });
+      // Check if the error is due to abort
+      if (error instanceof Error && error.name === "AbortError") {
+        console.log("Request aborted by user");
+        // Keep whatever content was accumulated before abort
+      } else {
+        console.error("Error:", error);
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          newMessages[assistantMsgIndex] = {
+            role: "assistant",
+            content: "Sorry, an error occurred. Please try again.",
+          };
+          return newMessages;
+        });
+      }
     } finally {
+      abortControllerRef.current = null;
       setIsLoading(false);
     }
   };
@@ -222,9 +262,29 @@ export default function ChatInterface() {
           <div className="text-center text-muted-foreground py-12">
             <p className="text-lg">Start a conversation!</p>
             <p className="text-sm mt-2">
-              Type a message below to begin chatting.
+              Type a message below or try one of these prompts:
             </p>
-            <p className="text-xs mt-2 opacity-60">
+
+            {/* Suggested Prompts */}
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto">
+              {SUGGESTED_PROMPTS.map((prompt, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleSuggestedPrompt(prompt)}
+                  disabled={isLoading}
+                  className="text-left p-4 border rounded-lg bg-background hover:bg-muted/50 hover:border-primary/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-primary text-lg mt-1 group-hover:scale-110 transition-transform">
+                      💬
+                    </span>
+                    <p className="text-sm text-foreground flex-1">{prompt}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <p className="text-xs mt-8 opacity-60">
               Your chat history is saved and will persist across page reloads.
             </p>
           </div>
@@ -360,13 +420,27 @@ export default function ChatInterface() {
           disabled={isLoading}
           className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 bg-background"
         />
-        <button
-          type="submit"
-          disabled={isLoading || !input.trim()}
-          className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-opacity"
-        >
-          {isLoading ? "Sending..." : "Send"}
-        </button>
+        {isLoading ? (
+          <button
+            type="button"
+            onClick={handleStop}
+            className="px-4 py-2 bg-black text-white rounded-lg hover:bg-black/80 transition-colors flex items-center gap-2 font-medium"
+            aria-label="Stop generating"
+          >
+            <Square className="h-4 w-4" />
+            <span>Stop</span>
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!input.trim()}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity flex items-center gap-2 font-medium"
+            aria-label="Send message"
+          >
+            <Send className="h-4 w-4" />
+            <span>Send</span>
+          </button>
+        )}
       </form>
     </div>
   );
