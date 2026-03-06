@@ -7,7 +7,6 @@ A real-time streaming chatbot application built with Next.js and OpenAI, featuri
 ```bash
 # 1. Clone the repository
 git clone <repository-url>
-cd aumera-stream
 
 # 2. Install dependencies
 npm install
@@ -27,8 +26,12 @@ That's it! Start chatting with the AI.
 
 - 🚀 Real-time LLM streaming with OpenAI GPT-4o-mini
 - 💬 Modern, responsive chat interface
-- � Rich Markdown formatting (headings, lists, code blocks, bold, etc.)
-- �💾 Chat history persistence with localStorage (survives page reloads)
+- 🛑 Request cancellation - stop streaming responses mid-generation
+- 💡 Suggested prompts for quick demo showcases
+- 📝 Rich Markdown formatting (headings, lists, code blocks, bold, etc.)
+- 💾 Chat history persistence with localStorage (survives page reloads)
+- 🛡️ Rate limiting (10 messages/minute) with client-side enforcement
+- 🔐 Input validation & sanitization (XSS protection, length limits)
 - ⚡ Built with Next.js 16.1.6 and Turbopack
 - 🎨 Styled with Tailwind CSS v4
 - 🔒 Secure API key management with environment variables
@@ -78,8 +81,16 @@ src/
 │   ├── globals.css            # Global styles & Tailwind config
 │   ├── layout.tsx             # Root layout
 │   └── page.tsx               # Main chat page
-└── components/
-    └── chat-interface.tsx     # Chat UI with streaming logic
+├── components/
+│   ├── chat-interface.tsx     # Main chat orchestrator (~350 lines)
+│   └── chat/
+│       ├── chat-header.tsx         # Header with title & clear button
+│       ├── message-bubble.tsx      # Individual message rendering
+│       ├── suggested-prompts.tsx   # Empty state prompt grid
+│       └── markdown-components.tsx # Markdown styling config
+└── lib/
+    ├── input-validator.ts     # Input validation, sanitization & rate limiting
+    └── stream-decoder.ts      # SSE stream parsing utility
 ```
 
 ## How It Works
@@ -94,21 +105,37 @@ The streaming is implemented **without using the Vercel AI SDK** - everything is
    - Forwards the stream directly to the client
 
 2. **Client Component** (`src/components/chat-interface.tsx`):
-   - Manages message state and UI
-   - Renders Markdown formatting in assistant responses
+   - Orchestrates chat functionality and state management
+   - Validates & sanitizes user input before sending
+   - Enforces rate limiting (10 messages/minute)
    - Persists chat history to localStorage
    - Restores conversation context on page reload
-   - Sends requests to the API route
+   - Sends requests to the API route with AbortController
    - Reads the streaming response using `ReadableStream`
    - Parses Server-Sent Events (SSE) format
    - Updates the UI in real-time with debounced rendering (50ms)
    - Smart auto-scroll that respects user's scroll position
+   - Cancels in-flight requests when user clicks Stop button
+   - Delegates rendering to focused sub-components
 
 3. **Stream Decoder** (`src/lib/stream-decoder.ts`):
    - Parses SSE format from OpenAI API
    - Handles buffering of incomplete messages
    - Yields content tokens as they arrive
    - Reusable utility for other streaming use cases
+
+4. **Input Validator** (`src/lib/input-validator.ts`):
+   - Validates message length (1-4000 characters)
+   - Sanitizes input (removes null bytes, normalizes whitespace)
+   - Detects XSS patterns (script tags, event handlers, etc.)
+   - Rate limiting with sliding window (10 messages/minute)
+   - Track message timestamps for abuse prevention
+
+5. **UI Components** (`src/components/chat/`):
+   - **ChatHeader**: Title, subtitle, and clear chat button
+   - **MessageBubble**: User/assistant message rendering with markdown
+   - **SuggestedPrompts**: Empty state with clickable prompt grid
+   - **markdownComponents**: Reusable ReactMarkdown styling config
 
 ### Key Technologies
 
@@ -127,17 +154,18 @@ The challenge specifically required **no abstraction layers**. This implementati
 ### Streaming Flow
 
 ```
-User Input → Chat Component → API Route → OpenAI API
-                    ↑              ↓            ↓
-                    └──── SSE Stream ←── Stream Response
+User Input → Validation → Chat Component → API Route → OpenAI API
+                    ↑          ↑              ↓            ↓
+                    └──────────└──── SSE Stream ←── Stream Response
 ```
 
-1. **Client → Server**: User message sent via POST to `/api/chat`
-2. **Server → OpenAI**: Edge function forwards request with streaming enabled
-3. **OpenAI → Server**: Returns SSE stream with `data:` prefixed chunks
-4. **Server → Client**: Proxies stream directly (no transformation)
-5. **Client Parsing**: ReadableStream reader decodes and parses SSE chunks
-6. **UI Updates**: React state updates for each token, triggering re-renders
+1. **Input Validation**: Sanitize input, check length & rate limits
+2. **Client → Server**: User message sent via POST to `/api/chat`
+3. **Server → OpenAI**: Edge function forwards request with streaming enabled
+4. **OpenAI → Server**: Returns SSE stream with `data:` prefixed chunks
+5. **Server → Client**: Proxies stream directly (no transformation)
+6. **Client Parsing**: ReadableStream reader decodes and parses SSE chunks
+7. **UI Updates**: React state updates for each token, triggering re-renders
 
 ### Key Technical Decisions
 
@@ -167,9 +195,12 @@ User Input → Chat Component → API Route → OpenAI API
 
 **5. Component Architecture**
 
-- Single "use client" component for interactivity
+- Main chat-interface as orchestrator (~350 lines)
+- Extracted UI components for single responsibility
+- Reusable, testable components (header, messages, prompts)
+- Markdown configuration separated for maintainability
 - Server Components for static layouts
-- Separation of concerns: API route (backend) vs Component (frontend)
+- Separation of concerns: API route (backend) vs Components (frontend)
 
 **6. Error Handling Strategy**
 
@@ -214,6 +245,43 @@ User Input → Chat Component → API Route → OpenAI API
 - User messages remain plain text for simplicity
 - Syntax highlighting ready (can be extended with plugins)
 
+**12. Request Cancellation with AbortController**
+
+- Browser-native AbortController API for request cancellation
+- Stop button replaces Send button while streaming
+- Cancels OpenAI API request immediately (stops token generation)
+- Preserves accumulated content before cancellation
+- Saves on API costs - you only pay for tokens generated before abort
+- Graceful error handling distinguishes abort from network failures
+
+**13. Suggested Prompts**
+
+- Four pre-written prompts displayed in empty state
+- Designed to generate longer responses for streaming demonstration
+- One-click activation - prompts auto-submit on click
+- Helps new users understand capabilities
+- Grid layout responsive to screen size
+
+**14. Rate Limiting & Input Validation**
+
+- Client-side rate limiting: 10 messages per minute maximum
+- Sliding window algorithm tracks message timestamps
+- Clear error messages when limit exceeded
+- Input sanitization removes dangerous characters
+- XSS pattern detection blocks malicious content
+- Length validation (1-4000 characters)
+- Errors display above input field and auto-clear on typing
+
+**15. Component Extraction & Refactoring**
+
+- Reduced main component from 487 to ~350 lines (28% reduction)
+- Extracted 4 focused UI components for better maintainability
+- Single responsibility principle: each component has one job
+- Improved testability: components can be tested in isolation
+- Reusable components: can be used in other parts of the app
+- Markdown configuration centralized and reusable
+- Follows Copilot instructions for clean code organization
+
 ### Performance Considerations
 
 - **Debounced Streaming**: 80% fewer re-renders with 50ms batching
@@ -225,10 +293,13 @@ User Input → Chat Component → API Route → OpenAI API
 
 ### Security Measures
 
-- API key stored in `.env.local` (never committed)
-- Request validation on API route
-- Error messages don't leak sensitive data
-- CORS handled by Next.js automatically
+- **API Key Protection**: Stored in `.env.local` (never committed to git)
+- **Input Validation**: Length limits (1-4000 chars) on all messages
+- **Input Sanitization**: Removes null bytes, normalizes whitespace
+- **XSS Prevention**: Detects and blocks suspicious patterns (script tags, event handlers, iframes)
+- **Rate Limiting**: Client-side enforcement of 10 messages/minute maximum
+- **Error Handling**: Error messages don't leak sensitive data
+- **CORS**: Handled by Next.js automatically
 
 ## Available Scripts
 
@@ -243,27 +314,39 @@ npm run lint         # Run ESLint
 
 ### What to Try
 
-1. **Basic Chat**: Type "Hello!" and watch the response stream token-by-token
-2. **Long Responses**: Ask "Explain quantum computing in detail" to see streaming with longer content
-3. **Persistence Test**: Have a conversation, then refresh the page (F5 or Cmd+R) - your messages should remain
-4. **Clear History**: Click the "Clear Chat" button in the header to reset the conversation
-5. **Scroll Behavior**: While a long response is streaming, scroll up to read earlier messages - notice the auto-scroll stops
-6. **Scroll Button**: When scrolled up, click the "↓ New messages below" button to jump back to the latest message
-7. **Multiple Messages**: Have a conversation - context is maintained across messages and page reloads
-8. **Mobile View**: Resize your browser or test on mobile for responsive design
-9. **Error Handling**: Stop the server mid-stream to see error recovery
+1. **Suggested Prompts**: On empty state, click any of the four suggested prompts to see instant streaming demos
+2. **Stop Button**: Click a suggested prompt (like the zoo newsletter), then click the Stop button mid-generation to cancel
+3. **Basic Chat**: Type "Hello!" and watch the response stream token-by-token
+4. **Long Responses**: Ask "Explain quantum computing in detail" to see streaming with longer content
+5. **Stop & Resume**: Start a long response, stop it halfway, then send another message - the chat continues normally
+6. **Persistence Test**: Have a conversation, then refresh the page (F5 or Cmd+R) - your messages should remain
+7. **Clear History**: Click the "Clear Chat" button in the header to reset the conversation
+8. **Scroll Behavior**: While a long response is streaming, scroll up to read earlier messages - notice the auto-scroll stops
+9. **Scroll Button**: When scrolled up, click the "↓ New messages below" button to jump back to the latest message
+10. **Multiple Messages**: Have a conversation - context is maintained across messages and page reloads
+11. **Mobile View**: Resize your browser or test on mobile for responsive design
+12. **Rate Limiting**: Try sending 11 messages rapidly - you should see an error after the 10th message
+13. **Input Validation**: Try typing a very long message (over 4000 characters) - submit will be blocked with an error
+14. **Error Handling**: Stop the server mid-stream to see error recovery
 
 ### Expected Behavior
 
+- ✅ Four suggested prompts appear when chat is empty
 - ✅ Responses appear in real-time with optimized rendering (50ms batching)
 - ✅ Three-dot animation while waiting for first token
+- ✅ Send button transforms into black Stop button during streaming
+- ✅ Stop button cancels request and preserves accumulated content
 - ✅ Chat history persists across page reloads and browser sessions
 - ✅ "Clear Chat" button appears when there are messages
 - ✅ Smart auto-scroll: follows new messages when you're at the bottom
 - ✅ Scroll preservation: stays in place when you scroll up to read
 - ✅ "New messages below" button appears when scrolled up
+- ✅ Rate limiting prevents more than 10 messages per minute
+- ✅ Error messages display for validation failures (too long, rate limit, etc.)
+- ✅ Errors auto-clear when user starts typing
+- ✅ Input field has max length of 4000 characters
 - ✅ Input disabled while processing
-- ✅ Clean, readable message formatting
+- ✅ Clean, readable message formatting with Markdown support
 
 ### Troubleshooting
 
@@ -288,23 +371,3 @@ npm run lint         # Run ESLint
 | Variable         | Description         | Required |
 | ---------------- | ------------------- | -------- |
 | `OPENAI_API_KEY` | Your OpenAI API key | Yes      |
-
-## Challenge Requirements
-
-This project fulfills the **Chatbot-LLM Stream Mini Challenge** requirements:
-
-- ✅ Real-time streaming of LLM responses
-- ✅ Modern, responsive chat interface
-- ✅ Direct streaming implementation (no AI SDK abstraction)
-- ✅ Efficient handling of streaming data
-- ✅ User-friendly interaction patterns
-- ✅ Performance optimization for streaming content
-
-## Tech Stack
-
-- **Framework:** Next.js 16.1.6 with App Router
-- **Language:** TypeScript
-- **Styling:** Tailwind CSS v4
-- **UI Components:** Custom components (shadcn/ui ready)
-- **LLM Provider:** OpenAI GPT-4o-mini
-- **Package Manager:** npm

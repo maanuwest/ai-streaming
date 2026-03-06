@@ -1,9 +1,16 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
 import { Send, Square } from "lucide-react";
 import { decodeStreamResponse } from "@/lib/stream-decoder";
+import {
+  validateChatInput,
+  checkRateLimit,
+  sanitizeInput,
+} from "@/lib/input-validator";
+import { ChatHeader } from "@/components/chat/chat-header";
+import { SuggestedPrompts } from "@/components/chat/suggested-prompts";
+import { MessageBubble } from "@/components/chat/message-bubble";
 
 interface Message {
   role: "user" | "assistant";
@@ -24,6 +31,7 @@ export default function ChatInterface() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -148,9 +156,29 @@ export default function ChatInterface() {
 
     if (!input.trim() || isLoading) return;
 
+    // Clear any previous errors
+    setError(null);
+
+    // Sanitize input
+    const sanitizedInput = sanitizeInput(input);
+
+    // Validate input
+    const inputValidation = validateChatInput(sanitizedInput);
+    if (!inputValidation.isValid) {
+      setError(inputValidation.error || "Invalid input");
+      return;
+    }
+
+    // Check rate limit
+    const rateLimitCheck = checkRateLimit();
+    if (!rateLimitCheck.isValid) {
+      setError(rateLimitCheck.error || "Rate limit exceeded");
+      return;
+    }
+
     const userMessage: Message = {
       role: "user",
-      content: input.trim(),
+      content: sanitizedInput,
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -233,24 +261,7 @@ export default function ChatInterface() {
 
   return (
     <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
-      {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">LLM Streaming Chat</h1>
-          <p className="text-muted-foreground">
-            Real-time streaming chatbot powered by OpenAI
-          </p>
-        </div>
-        {messages.length > 0 && (
-          <button
-            onClick={clearChat}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground border rounded-lg hover:bg-muted/50 transition-colors"
-            title="Clear chat history"
-          >
-            Clear Chat
-          </button>
-        )}
-      </div>
+      <ChatHeader messageCount={messages.length} onClearChat={clearChat} />
 
       {/* Messages Container */}
       <div
@@ -259,138 +270,15 @@ export default function ChatInterface() {
         className="flex-1 overflow-y-auto mb-4 space-y-4 p-4 border rounded-lg bg-muted/10"
       >
         {messages.length === 0 && (
-          <div className="text-center text-muted-foreground py-12">
-            <p className="text-lg">Start a conversation!</p>
-            <p className="text-sm mt-2">
-              Type a message below or try one of these prompts:
-            </p>
-
-            {/* Suggested Prompts */}
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto">
-              {SUGGESTED_PROMPTS.map((prompt, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleSuggestedPrompt(prompt)}
-                  disabled={isLoading}
-                  className="text-left p-4 border rounded-lg bg-background hover:bg-muted/50 hover:border-primary/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="text-primary text-lg mt-1 group-hover:scale-110 transition-transform">
-                      💬
-                    </span>
-                    <p className="text-sm text-foreground flex-1">{prompt}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            <p className="text-xs mt-8 opacity-60">
-              Your chat history is saved and will persist across page reloads.
-            </p>
-          </div>
+          <SuggestedPrompts
+            prompts={SUGGESTED_PROMPTS}
+            onSelectPrompt={handleSuggestedPrompt}
+            disabled={isLoading}
+          />
         )}
 
         {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`flex ${
-              message.role === "user" ? "justify-end" : "justify-start"
-            }`}
-          >
-            <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                message.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-foreground"
-              }`}
-            >
-              <div className="text-xs font-semibold mb-1 opacity-70">
-                {message.role === "user" ? "You" : "Assistant"}
-              </div>
-              {message.role === "user" ? (
-                <div className="whitespace-pre-wrap">{message.content}</div>
-              ) : (
-                <div className="markdown-content">
-                  <ReactMarkdown
-                    components={{
-                      h1: ({ ...props }) => (
-                        <h1
-                          className="text-2xl font-bold mt-4 mb-3"
-                          {...props}
-                        />
-                      ),
-                      h2: ({ ...props }) => (
-                        <h2
-                          className="text-xl font-bold mt-4 mb-2"
-                          {...props}
-                        />
-                      ),
-                      h3: ({ ...props }) => (
-                        <h3
-                          className="text-lg font-semibold mt-3 mb-2"
-                          {...props}
-                        />
-                      ),
-                      p: ({ ...props }) => (
-                        <p className="my-2 leading-relaxed" {...props} />
-                      ),
-                      ul: ({ ...props }) => (
-                        <ul
-                          className="my-2 list-disc pl-5 space-y-1"
-                          {...props}
-                        />
-                      ),
-                      ol: ({ ...props }) => (
-                        <ol
-                          className="my-2 list-decimal pl-5 space-y-1"
-                          {...props}
-                        />
-                      ),
-                      li: ({ ...props }) => <li className="my-1" {...props} />,
-                      strong: ({ ...props }) => (
-                        <strong className="font-semibold" {...props} />
-                      ),
-                      code: ({ ...props }) => (
-                        <code
-                          className="bg-muted/50 px-1.5 py-0.5 rounded text-sm font-mono"
-                          {...props}
-                        />
-                      ),
-                      pre: ({ ...props }) => (
-                        <pre
-                          className="bg-muted/50 p-3 rounded-lg overflow-x-auto my-2"
-                          {...props}
-                        />
-                      ),
-                      blockquote: ({ ...props }) => (
-                        <blockquote
-                          className="border-l-4 border-primary pl-4 italic my-2"
-                          {...props}
-                        />
-                      ),
-                      a: ({ ...props }) => (
-                        <a
-                          className="text-primary underline hover:opacity-80"
-                          {...props}
-                        />
-                      ),
-                    }}
-                  >
-                    {message.content}
-                  </ReactMarkdown>
-                </div>
-              )}
-              {message.role === "assistant" &&
-                message.content === "" &&
-                isLoading && (
-                  <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 bg-current rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                    <div className="w-2 h-2 bg-current rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                    <div className="w-2 h-2 bg-current rounded-full animate-bounce"></div>
-                  </div>
-                )}
-            </div>
-          </div>
+          <MessageBubble key={index} message={message} isLoading={isLoading} />
         ))}
         <div ref={messagesEndRef} />
       </div>
@@ -410,14 +298,26 @@ export default function ChatInterface() {
         </div>
       )}
 
+      {/* Error Message */}
+      {error && (
+        <div className="mb-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+          {error}
+        </div>
+      )}
+
       {/* Input Form */}
       <form onSubmit={handleSubmit} className="flex gap-2">
         <input
           type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            // Clear error when user starts typing
+            if (error) setError(null);
+          }}
           placeholder="Type your message..."
           disabled={isLoading}
+          maxLength={4000}
           className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 bg-background"
         />
         {isLoading ? (
